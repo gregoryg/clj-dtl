@@ -8,7 +8,9 @@
                  [cheshire "5.3.1"]
                  ]
   :plugins [[lein-ring "0.8.11"]]
-  :ring {:handler clj-dtl.handler/app}
+  :ring {:handler clj-dtl.handler/app
+         :nrepl {:start? true
+                 :port 8888}}
   :profiles
   {:dev {:dependencies [[javax.servlet/servlet-api "2.5"]
                         [ring-mock "0.1.5"]]}})

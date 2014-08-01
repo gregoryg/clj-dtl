@@ -1,7 +1,11 @@
-(ns clj-api
+(ns clj-dtl.api
   (:require [cheshire.core :refer :all]))
 
 (def dtl-job-path "/home/gregj/Copy/projects/programming/syncsort-dtl/dtl-projects/sessionize-weblogs/sessionize-weblogs-job.dtl")
+
+(defn set-dtl-file-path! [path]
+    (def dtl-job-path path))
+
 
 (defn get-links []
   (map #(into {} {:from (nth % 2) :to (nth % 3) :mapreduce (string? (nth % 1))}) 
