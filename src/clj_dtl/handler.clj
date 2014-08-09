@@ -28,6 +28,7 @@
   (GET "/" [] "Hello World")
   (GET "/count-up/:to" [to] (str-to (Integer. to)))
   (GET "/count-down/:from" [from] (str-from (Integer. from)))
+  (GET "/dtl/path" [] (encode {:path dtl-job-path}))
   (GET "/dtl/setpath/:path" [path] (set-dtl-file-path path))
   (GET "/dtl/tasks" [] (encode {:tasks (get-tasks)}))
   (GET "/dtl/node-data-array" [] (encode (gojs-node-data-array)))
@@ -35,9 +36,24 @@
   (route/resources "/")
   (route/not-found "Not Found"))
 
-(def app
- (handler/site app-routes))
+;; (def handler 
+;;   (wrap-cors app-routes :access-control-allow-origin #"http://lemoncheeks"
+;;                        :access-control-allow-methods [:get :put :post :delete]))
+(defn allow-cross-origin
+  "middleware to allow cross origin"
+  [handler]
+  (fn [request]
+    (let [response (handler request)]
+      (assoc-in response [:headers "Access-Control-Allow-Origin"]
+                "*"))))
 
+;; (def app
+;;   (handler/site app-routes))
+(def app
+  (->
+   (handler/site app-routes)
+   (allow-cross-origin)))
+  
 ;; (defn start-server
 ;;   []
 ;;   (run-jetty (app) {:port 8888 :join? false}))
