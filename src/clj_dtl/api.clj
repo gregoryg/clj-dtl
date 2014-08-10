@@ -1,7 +1,7 @@
 (ns clj-dtl.api
   (:require [cheshire.core :refer :all]))
 
-(def dtl-job-path "/home/gregj/Copy/projects/programming/syncsort-dtl/dtl-projects/sessionize-weblogs/sessionize-weblogs-job.dtl")
+(def dtl-job-path "/work/syncsort-dtl/dtl-projects/sessionize-weblogs/sessionize-weblogs-job.dtl")
 
 (defn set-dtl-file-path! [path]
     (def dtl-job-path path))
@@ -64,12 +64,61 @@
   "TODO"
   nil)
 
+;;; functions that read the task
+(defn task-files
+  "Source and Target files in the task"
+  [task-id]
+  (let [task (clojure.string/replace  ;; filter out comments (DTL allows only single-line comments)
+              (slurp (str (clj-dtl.api/project-dir dtl-job-path) "/" task-id))
+              #"\s*/\*.*?\*/" 
+              "")
+        files (map #(into {} 
+                          {
+                           :type   (cond (= "IN" (nth % 1)) "source" (= "OUT" (nth % 1)) "target" :else "unknown") 
+                           :path (nth % 2) 
+                           :name (nth % 2)
+                           :info (last (clojure.string/split (nth % 2) #"/"))
+                           :figure (cond (= "IN" (nth % 1)) "Ellipse" (= "OUT" (nth % 1)) "Diamond" :else "Rectangle")
+                           :color "#F7B84B"
+                           }) 
+                   (re-seq #"\s*/(IN|OUT)FILE\s+([^ \n]+)" task))]
+    (into [] files)
+    ))
+
 (defn tagged-tasks
   "Return tasks tagged for use with Go.js"
   []
   (let [mapper-tasks (previous-tasks (first-reducer-task))]
-    (map #(into {} {:key % :text % :group (cond (empty? mapper-tasks) "standard" (some #{%} mapper-tasks) "mapper" :else "reducer") :fields (task-files %)})
+    (map #(into {} 
+                {
+                 :key % :text % 
+                 :group (cond (empty? mapper-tasks) "standard" (some #{%} mapper-tasks) "mapper" :else "reducer") 
+                 :fields (task-files %)
+                 
+                 })
          (get-tasks))))
+
+(defn tagged-links
+  "Add in source/target linkage to links sequence"
+  []
+  (mapcat identity
+  (let [my-tasks (tagged-tasks)]
+    (map #(let [my-link %
+                my-from-task (first (filter (fn [x] (= (:key x) (:from my-link))) my-tasks))
+                my-to-task   (first (filter (fn [x] (= (:key x) (:to my-link)))   my-tasks))
+                my-targets (map :path (filter (fn [x] (= (:type x) "target")) (:fields my-from-task)))
+                my-sources (map :path (filter (fn [x] (= (:type x) "source")) (:fields my-to-task)))
+                matched-ports (clojure.set/intersection (set my-targets) (set my-sources))
+                ]
+            ;; (if (= (first my-targets) (first my-sources))
+            ;;   (into my-link {:fromPort (first my-targets) :toPort (first my-sources)})
+            ;;   my-link))
+
+            (if-not (empty? matched-ports)
+              (map (fn [x] (conj my-link {:fromPort x :toPort x})) (seq matched-ports))
+              my-link))
+         (get-links)
+         ))))
 
 (defn gojs-node-data-array
   "Complete nodeDataArray for GraphLinksModel in Go.js"
@@ -81,13 +130,5 @@
 (defn gojs-link-data-array
   "Complete linkDataArray for GraphLinksModel in Go.js"
   []
-  (map #(assoc % :color (if (:mapreduce %) "red" "blue")) (get-links)))
+  (map #(assoc % :color (if (:mapreduce %) "red" "blue")) (tagged-links)))
 
-;;; functions that read the task
-(defn task-files
-  "Source and Target files in the task"
-  [task-id]
-  (let [task (slurp (str (clj-dtl.api/project-dir dtl-job-path) "/" task-id))
-        files (map #(into {} {:type (cond (= "IN" (nth % 1)) "source" (= "OUT" (nth % 1)) "target" :else "unknown") :path (nth % 2)}) (re-seq #"\s*/(IN|OUT)FILE\s+([^ \n]+)" task))]
-    (into [] files)
-  ))

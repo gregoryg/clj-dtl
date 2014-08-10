@@ -14,4 +14,5 @@
                  :port 8888}}
   :profiles
   {:dev {:dependencies [[javax.servlet/servlet-api "2.5"]
+                        [ring/ring-devel "1.3.0"]
                         [ring-mock "0.1.5"]]}})
