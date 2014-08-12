@@ -11,15 +11,23 @@
   [path]
   (.getParent (java.io.File. path)))
 
+(defn- get-dtl-file
+  "Read DTL job or task file, removing comments"
+  [path]
+  (clojure.string/replace  ;; filter out comments (DTL allows only single-line comments)
+   (slurp path)
+   #"\s*/\*.*?\*/" 
+   ""))
+
 (defn get-links []
   (map #(into {} {:from (nth % 2) :to (nth % 3) :mapreduce (string? (nth % 1))}) 
-       (re-seq #"\s*(/MAPREDUCE)?\s*/?FLOW\s+([^ \n]+)\s+([^ \n]+)" 
-               (slurp dtl-job-path))))
+       (re-seq #"(/MAPREDUCE)?\s*/?FLOW\s+([^ \n]+)\s+([^ \n]+)" 
+               (get-dtl-file  dtl-job-path))))
 
 (defn get-tasks 
   "Return all tasks (nodes) in current job."
   []
-  (map #(nth % 1) (re-seq #"\s*/TASK\s+FILE\s+([^ \n]+)" (slurp dtl-job-path))))
+  (map #(nth % 1) (re-seq #"\s*/TASK\s+FILE\s+([^ \n]+)" (get-dtl-file dtl-job-path))))
 
 (defn mapreduce-link
   "Return links which are mapreduce sequences"
@@ -42,21 +50,27 @@
   [task-id]
   (filter #(= task-id %) (get-tasks)))
 
-(defn previous-task
-  "Return the task linked FROM current task"
-  [task-id]
-  (:from (first
-        (filter #(= task-id (:to %)) (get-links)))))
-
 (defn previous-tasks
+  "Return the tasks linked FROM current task"
+  [task-id]
+  (map #(:from %)
+        (filter #(= task-id (:to %)) (get-links))))
+
+(defn all-previous-tasks
   "Return ALL tasks linked from current task"
-  ([task-id] (previous-tasks task-id nil))
+  ([task-id] (all-previous-tasks task-id nil))
   ([task-id tasks]
-     (if (empty? (previous-task task-id))
+     (if (empty? (previous-tasks task-id))
        tasks
-        (concat
-         (list (previous-task task-id))
-             (previous-tasks (previous-task task-id) tasks)))))
+       (filter (fn [x] (not (empty? x)))
+               (flatten
+                (map (fn [x] 
+                       (list x
+                             (all-previous-tasks x) tasks)
+                             ) ; anon fun
+                     (previous-tasks task-id)
+                     ) ;; map
+               )))))
 
 (defn links-from-task
   "Return to and from links"
@@ -69,7 +83,7 @@
   "Source and Target files in the task"
   [task-id]
   (let [task (clojure.string/replace  ;; filter out comments (DTL allows only single-line comments)
-              (slurp (str (clj-dtl.api/project-dir dtl-job-path) "/" task-id))
+              (get-dtl-file (str (clj-dtl.api/project-dir dtl-job-path) "/" task-id))
               #"\s*/\*.*?\*/" 
               "")
         files (map #(into {} 
@@ -88,7 +102,7 @@
 (defn tagged-tasks
   "Return tasks tagged for use with Go.js"
   []
-  (let [mapper-tasks (previous-tasks (first-reducer-task))]
+  (let [mapper-tasks (all-previous-tasks (first-reducer-task))]
     (map #(into {} 
                 {
                  :key % :text % 
@@ -101,7 +115,7 @@
 (defn tagged-links
   "Add in source/target linkage to links sequence"
   []
-  (mapcat identity
+  (flatten
   (let [my-tasks (tagged-tasks)]
     (map #(let [my-link %
                 my-from-task (first (filter (fn [x] (= (:key x) (:from my-link))) my-tasks))
@@ -110,15 +124,29 @@
                 my-sources (map :path (filter (fn [x] (= (:type x) "source")) (:fields my-to-task)))
                 matched-ports (clojure.set/intersection (set my-targets) (set my-sources))
                 ]
-            ;; (if (= (first my-targets) (first my-sources))
-            ;;   (into my-link {:fromPort (first my-targets) :toPort (first my-sources)})
-            ;;   my-link))
-
             (if-not (empty? matched-ports)
               (map (fn [x] (conj my-link {:fromPort x :toPort x})) (seq matched-ports))
               my-link))
          (get-links)
-         ))))
+         ))
+
+  ))
+
+(defn- source-paths
+  "All paths defined as sources in DTL tasks"
+  []
+  (map 
+   (fn [x] (:path x)) 
+   (filter #(= "source" (:type %)) 
+           (flatten (map #(:fields %) (tagged-tasks)))))) ;; could use (set tagged-tasks) to ensure uniqueness
+
+(defn- target-paths
+  "All paths defined as targets in DTL tasks"
+  []
+  (map 
+   (fn [x] (:path x)) 
+   (filter #(= "target" (:type %)) 
+           (flatten (map #(:fields %) (tagged-tasks)))))) ;; could use (set tagged-tasks) to ensure uniqueness
 
 (defn gojs-node-data-array
   "Complete nodeDataArray for GraphLinksModel in Go.js"
@@ -130,5 +158,5 @@
 (defn gojs-link-data-array
   "Complete linkDataArray for GraphLinksModel in Go.js"
   []
-  (map #(assoc % :color (if (:mapreduce %) "red" "blue")) (tagged-links)))
+  (map #(assoc % :color (if (:mapreduce %) "red" "blue"))  (tagged-links)))
 
