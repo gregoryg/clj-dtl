@@ -1,6 +1,8 @@
 (ns clj-dtl.api
   (:require [cheshire.core :refer :all]))
 
+;; {:dtl {:tasktype :sort :infile {:value "${APACHE_WEBLOGS_DIR}/SAMPLE-access_1.log" :serverconnection "HDFSConnection" :filetype :stlf :fieldseparator " " :enclosedby ["\"\"" "[]"] :layout :apache-weblogs-layout} :serverconnection {:value "$HDFS_SERVER" :alias "HDFSConnection"}}}
+
 (def dtl-job-path "/work/syncsort-dtl/dtl-projects/sessionize-weblogs/sessionize-weblogs-job.dtl")
 
 (defn set-dtl-file-path! [path]
@@ -19,6 +21,11 @@
    #"\s*/\*.*?\*/" 
    ""))
 
+(defn- read-task
+  [task-id]
+  (get-dtl-file (str (clj-dtl.api/project-dir dtl-job-path) "/" task-id)))
+  
+
 (defn get-links []
   (map #(into {} {:from (nth % 2) :to (nth % 3) :mapreduce (string? (nth % 1))}) 
        (re-seq #"(/MAPREDUCE)?\s*/?FLOW\s+([^ \n]+)\s+([^ \n]+)" 
@@ -33,6 +40,9 @@
   "Return links which are mapreduce sequences"
   []
   (filter #(true? (:mapreduce %)) (get-links)))
+
+;; (defn task-type
+;;   (
 
 (defn final-mapper-task
   "Return the task to the \"left\" side of the mapreduce link"
@@ -82,10 +92,7 @@
 (defn task-files
   "Source and Target files in the task"
   [task-id]
-  (let [task (clojure.string/replace  ;; filter out comments (DTL allows only single-line comments)
-              (get-dtl-file (str (clj-dtl.api/project-dir dtl-job-path) "/" task-id))
-              #"\s*/\*.*?\*/" 
-              "")
+  (let [task (get-dtl-file (str (clj-dtl.api/project-dir dtl-job-path) "/" task-id))
         files (map #(into {} 
                           {
                            :type   (cond (= "IN" (nth % 1)) "source" (= "OUT" (nth % 1)) "target" :else "unknown") 
@@ -148,15 +155,33 @@
    (filter #(= "target" (:type %)) 
            (flatten (map #(:fields %) (tagged-tasks)))))) ;; could use (set tagged-tasks) to ensure uniqueness
 
+(defn- unmatched-source-paths
+  "Paths defined as sources with no matching targets"
+  []
+  (seq 
+   (clojure.set/difference (set (source-paths)) (set (target-paths)))))
+
+(defn- unmatched-target-paths
+  "Paths defined as targets with no matching sources"
+  []
+  (seq 
+   (clojure.set/difference (set (target-paths)) (set (source-paths)))))
+
+(def gojs-groups-data '(
+                        {:group "mapper" :color "blue" :text "mapper logic"} 
+                        {:group "reducer" :color "red" :text "reducer logic"} 
+                        {:group "standard" :color "green" :text "non-mapreduce"}))
+
 (defn gojs-node-data-array
   "Complete nodeDataArray for GraphLinksModel in Go.js"
   []
-  (into (tagged-tasks)
-         '({:key "mapper", :text "mapper logic", :color "blue", :isGroup true} 
-         {:key "reducer", :text "reducer logic", :color "red", :isGroup true})))
-        
+  (let [tt (tagged-tasks)
+        groups (map #(:group %) tt)
+        gojs-groups (map (fn [x] (conj {} (when (some (fn [y] (= (:group x) y)) groups) {:key (:group x) :color (:color x) :isGroup true :text (:text x)})))
+                         gojs-groups-data)
+        ]
+    (filter #(not-empty %) (into tt gojs-groups))))
 (defn gojs-link-data-array
   "Complete linkDataArray for GraphLinksModel in Go.js"
   []
   (map #(assoc % :color (if (:mapreduce %) "red" "blue"))  (tagged-links)))
-
