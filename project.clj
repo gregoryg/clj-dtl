@@ -7,6 +7,7 @@
                  [ring/ring-jetty-adapter "1.3.0"]
                  [cheshire "5.3.1"]
                  [ring-cors "0.1.4"]
+                 [instaparse "1.3.3"]
                  ]
   :plugins [[lein-ring "0.8.11"]]
   :ring {:handler clj-dtl.handler/app
