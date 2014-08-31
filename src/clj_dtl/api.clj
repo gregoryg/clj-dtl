@@ -1,12 +1,20 @@
 (ns clj-dtl.api
-  (:require [cheshire.core :refer :all]))
+  (:require [cheshire.core :refer :all]
+            [clojure.string :as s]
+            [instaparse.core :as insta]
+            ))
+;; TODO:
+;;   ensure first source is DFS
+;;      - /INFILE source has SERVERCONNECTION
+;;      - /SERVERCONNECTION is HDFS type
+
 
 ;; {:dtl {:tasktype :sort :infile {:value "${APACHE_WEBLOGS_DIR}/SAMPLE-access_1.log" :serverconnection "HDFSConnection" :filetype :stlf :fieldseparator " " :enclosedby ["\"\"" "[]"] :layout :apache-weblogs-layout} :serverconnection {:value "$HDFS_SERVER" :alias "HDFSConnection"}}}
 
 (def dtl-job-path "/work/syncsort-dtl/dtl-projects/sessionize-weblogs/sessionize-weblogs-job.dtl")
 
 (defn set-dtl-file-path! [path]
-    (def dtl-job-path path))
+  (def dtl-job-path path))
 
 (defn project-dir 
   "Project directory (directory of the job file)"
@@ -16,15 +24,20 @@
 (defn- get-dtl-file
   "Read DTL job or task file, removing comments"
   [path]
-  (clojure.string/replace  ;; filter out comments (DTL allows only single-line comments)
+  (s/replace  ;; filter out comments (DTL allows only single-line comments)
    (slurp path)
    #"\s*/\*.*?\*/" 
    ""))
 
 (defn- read-task
+  "Read task, return as string with comments and multi-line formatting stripped out."
   [task-id]
-  (get-dtl-file (str (clj-dtl.api/project-dir dtl-job-path) "/" task-id)))
-  
+  (s/replace 
+   (s/replace 
+    (get-dtl-file (str (clj-dtl.api/project-dir dtl-job-path) "/" task-id))
+    #"\n+\s*" "\n")
+   #"\n+\s*([^/])" " $1"))
+
 
 (defn get-links []
   (map #(into {} {:from (nth % 2) :to (nth % 3) :mapreduce (string? (nth % 1))}) 
@@ -64,7 +77,7 @@
   "Return the tasks linked FROM current task"
   [task-id]
   (map #(:from %)
-        (filter #(= task-id (:to %)) (get-links))))
+       (filter #(= task-id (:to %)) (get-links))))
 
 (defn all-previous-tasks
   "Return ALL tasks linked from current task"
@@ -77,10 +90,10 @@
                 (map (fn [x] 
                        (list x
                              (all-previous-tasks x) tasks)
-                             ) ; anon fun
+                       ) ; anon fun
                      (previous-tasks task-id)
                      ) ;; map
-               )))))
+                )))))
 
 (defn links-from-task
   "Return to and from links"
@@ -98,7 +111,7 @@
                            :type   (cond (= "IN" (nth % 1)) "source" (= "OUT" (nth % 1)) "target" :else "unknown") 
                            :path (nth % 2) 
                            :name (nth % 2)
-                           :info (last (clojure.string/split (nth % 2) #"/"))
+                           :info (last (s/split (nth % 2) #"/"))
                            :figure (cond (= "IN" (nth % 1)) "Ellipse" (= "OUT" (nth % 1)) "Diamond" :else "Rectangle")
                            :color "#F7B84B"
                            }) 
@@ -123,21 +136,21 @@
   "Add in source/target linkage to links sequence"
   []
   (flatten
-  (let [my-tasks (tagged-tasks)]
-    (map #(let [my-link %
-                my-from-task (first (filter (fn [x] (= (:key x) (:from my-link))) my-tasks))
-                my-to-task   (first (filter (fn [x] (= (:key x) (:to my-link)))   my-tasks))
-                my-targets (map :path (filter (fn [x] (= (:type x) "target")) (:fields my-from-task)))
-                my-sources (map :path (filter (fn [x] (= (:type x) "source")) (:fields my-to-task)))
-                matched-ports (clojure.set/intersection (set my-targets) (set my-sources))
-                ]
-            (if-not (empty? matched-ports)
-              (map (fn [x] (conj my-link {:fromPort x :toPort x})) (seq matched-ports))
-              my-link))
-         (get-links)
-         ))
+   (let [my-tasks (tagged-tasks)]
+     (map #(let [my-link %
+                 my-from-task (first (filter (fn [x] (= (:key x) (:from my-link))) my-tasks))
+                 my-to-task   (first (filter (fn [x] (= (:key x) (:to my-link)))   my-tasks))
+                 my-targets (map :path (filter (fn [x] (= (:type x) "target")) (:fields my-from-task)))
+                 my-sources (map :path (filter (fn [x] (= (:type x) "source")) (:fields my-to-task)))
+                 matched-ports (clojure.set/intersection (set my-targets) (set my-sources))
+                 ]
+             (if-not (empty? matched-ports)
+               (map (fn [x] (conj my-link {:fromPort x :toPort x})) (seq matched-ports))
+               my-link))
+          (get-links)
+          ))
 
-  ))
+   ))
 
 (defn- source-paths
   "All paths defined as sources in DTL tasks"
@@ -185,3 +198,40 @@
   "Complete linkDataArray for GraphLinksModel in Go.js"
   []
   (map #(assoc % :color (if (:mapreduce %) "red" "blue"))  (tagged-links)))
+
+;; work on determining if first source is HDFS
+(defn unformatted-task
+  "Seq of commands with arguments from task."
+  [task-id]
+  (map (fn [x] (s/replace x "\n" "")) 
+       (re-seq #"\n/[^/\n]+" 
+               (s/replace 
+                (read-task task-id) #"\n\s*" "\n"))))
+
+(defn task-source-params
+  [task-id]
+  (filter 
+   #(let [cmd (first (s/split % #"\s"))] 
+      (or 
+       (= cmd "/INFILE") 
+       (= cmd "/INPIPE") 
+       (= cmd "/SERVERCONNECTION"))) 
+   (unformatted-task task-id)))
+
+(defn dtl-command-to-keyword
+  [cmd]
+  (keyword (s/lower-case (nth (s/split (s/replace cmd #"^/" "") #"\s") 0))))
+
+
+(def g "/DTL
+/TASKTYPE SORT    NODUPLICATE 
+    /INFILE ${HDFS_SOURCE_DIR}/LineItemsPrevious.txt SERVERCONNECTION HDFSConnection STLF FIELDSEPARATOR \",\" ENCLOSEDBY \"\"\"\" LAYOUT lineitem_delim
+    /INFILE ${HDFS_SOURCE_DIR}/LineItemsCurrent.txt  SERVERCONNECTION HDFSConnection STLF FIELDSEPARATOR \",\" ENCLOSEDBY \"\"\"\" LAYOUT lineitem_delim
+    /KEYS APartitionNum ASCENDING, someOther DESCENDING
+/END")
+
+(def dtl-parser
+  (insta/parser (slurp "src/clj_dtl/dtl.ebnf") :output-format :enlive))
+
+;; (dtl-parser g :total true)
+
