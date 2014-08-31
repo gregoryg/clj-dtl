@@ -1,0 +1,116 @@
+dtl-task = DTLSTART TASKTYPE? DTLCMD+ DTLEND
+DTLSTART = spnl* '/DTL' nl
+DTLEND   = '/END' nl?
+TASKTYPE = <'/TASKTYPE'> sp task_type_settings nl
+(* <task_type_settings> = {'COPY' [copy_settings]} | SORT | 'MERGE' | 'JOIN' | 'AGGREGATE' *)
+<task_type_settings> = {'COPY' [copy_settings]} 
+                       {'SORT' [sort_settings]}
+		       {'JOIN' #'.*'}
+		       {'MERGE' #'.*'}
+		       {'AGGREGATE' #'.*'}
+<copy_settings> = sp* 'ALLOWREORDERING'
+<sort_settings> = sp* 'NODUPLICATE'
+(* commands section *)
+<DTLCMD> = {INFILE}
+	   {SERVERCONNECTIONCMD}
+	   {KEYS}
+	   {DATADICTIONARY}
+	   {DELIMITEDRECORDLAYOUT}
+(* commands not yet implemented in the grammar *)
+	   {'/REFORMAT' rest_of_line}
+	   {'/COLLATINGSEQUENCE' rest_of_line}
+	   {'/VALUE' rest_of_line}
+	   {'/CONDITION' rest_of_line}
+	   {'/COLLATINGSEQUENCE' rest_of_line}
+	   {'/CONDITION' rest_of_line}
+	   {'/DATASIZE' rest_of_line}
+	   {'/DBCONNECTION' rest_of_line}
+	   {'/DBINPUT' rest_of_line}
+	   {'/DBDATA' rest_of_line}
+	   {'/DBOUTPUT' rest_of_line}
+	   {'/FILE' rest_of_line}
+	   {'/FILTER' rest_of_line}
+	   {'/GROUPBY' rest_of_line}
+	   {'/INBUFFER' rest_of_line}
+	   {'/FILE' rest_of_line}
+	   {'/INMAXRECORDLENGTH' rest_of_line}
+	   {'/INPIPE' rest_of_line}
+	   {'/JOINKEYS' rest_of_line}
+	   {'/LOGOPTIONS' rest_of_line}
+	   {'/MEMORY' rest_of_line}
+	   {'/MQCONNECTION' rest_of_line}
+	   {'/MQFIELDSEXTRACT' rest_of_line}
+	   {'/MQINPUT' rest_of_line}
+	   {'/MQOUTPUT' rest_of_line}
+	   {'/NOPROMPT' rest_of_line}
+	   {'/NULLIF' rest_of_line}
+	   {'/OUTBUFFER' rest_of_line}
+	   {'/OUTFILE' rest_of_line}
+	   {'/OUTPIPE' rest_of_line}
+	   {'/PADBYTE' rest_of_line}
+	   {'/PARTITION' rest_of_line}
+	   {'/RECORDLAYOUT' '#[^/]+'}
+	   {'/REFORMAT' rest_of_line}
+	   {'/STABLE' rest_of_line}
+	   {'/SUMMARY' rest_of_line}
+	   {'/TASKDOCUMENTATION' rest_of_line}
+	   {'/VALUE' '#[^/]+'}
+	   {'/WORKSPACE' rest_of_line}
+
+DATADICTIONARY = '/DATADICTIONARY' sp #'.*' nl
+(* this is a comment *)
+KEYS = '/KEYS' sp field (',' sp* field)* nl
+field = field_name sp* ['COLLATINGSEQUENCE' sp sequence] sp* [sense]
+<field_name> = #'[^ \n,]+'
+sequence = #'[^ \n]+'
+sense = 'ASCENDING' | 'DESCENDING'
+DELIMITEDRECORDLAYOUT = <'/DELIMITEDRECORDLAYOUT'> sp NAME sp* <'{'> sp* rlfield (sp* ',' sp* rlfield)* sp* '}' nl
+(* TODO: define grammar for composite field *)
+rlfield = 'composite_field' | elementary_field
+(* elementary_field = {NAME sp [format] [sp* 'ENCODING' sp #'[-a-zA-Z0-9]+'] [nullability] [REPEAT]} *)
+<elementary_field> = NAME sp* [format]
+		   {FILLER}
+format = {'CHARACTER'}
+         {number_format}
+	 {'DATETIME' sp '(' datetime_pattern ')'}
+	 {'LOB'}
+nullability = 'NOTNULLABLE' | 'NULLIFEMPTY'
+number_format = 'EN' | 'SN'
+filler_count = number
+datetime_pattern = #'[^\(\)]+'
+REPEAT = 'REPEAT' sp number
+FILLER = 'FILLER' | ('FILLER' sp number)
+	 
+INFILE = <'/INFILE'> sp PATH sp* ['EXPANDWILDCARDS'] sp* [SERVERCONNECTION] sp* [ALIAS] sp* file_type sp* [FIELDSEPARATOR] sp* ENCLOSEDBY* sp* [LAYOUT] nl
+PATH = #'[^ \n]+'
+file_type = {'STREAM CRLF'}
+	    {'STLF'}
+	    {'FIXED' sp record_length sp [record_alignment]}
+	    {'VARIABLE' sp [record_alignment]}
+	    {'MFFIXED' sp record_length}
+	    {'MFVARIABLE'}
+	    {'MFLINESEQUENTIAL'}
+	    {'INDEXED'}
+<NAME> = #'[-_\'\"\$a-zA-Z0-9]+'
+record_length = #'[0-9]+'
+record_alignment = {'ALIGNED2'}
+		   {'ALIGNED4'}
+		   {'UNALIGNED'}
+SERVERCONNECTION = <'SERVERCONNECTION'> sp NAME
+SERVERCONNECTIONCMD = <'/SERVERCONNECTION'> sp NAME sp connection_type sp* [ALIAS] nl
+connection_type = 'FTP' | 'SFTP' | 'HDFS'
+ALIAS = <'ALIAS'> sp #'[^ \n]+'
+STLF = <'STLF'>
+FIELDSEPARATOR = <'FIELDSEPARATOR'> sp #'[xX]?[\'\"][a-zA-Z0-9]+[\'\"]'
+ENCLOSEDBY = <'ENCLOSEDBY'> sp leading_character [sp* ',' sp* trailing_character] sp*
+leading_character = {'""""'}
+		    {"''''"}
+		    {#'[\'\"].[\'\"]'}
+		    
+trailing_character = #'[\'"]' #'.' #'[\'"]'
+LAYOUT = <'LAYOUT'> sp #'[\-_a-zA-Z0-9]+'
+number = #'[0-9]+'
+<sp> = <#'\s+'>
+<nl> = <#'[\s*\n]+'>
+<spnl> = (sp | nl)
+<rest_of_line> = <#'.+' nl>
