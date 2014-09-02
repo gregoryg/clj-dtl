@@ -1,5 +1,5 @@
 dtl-task = DTLSTART TASKTYPE? DTLCMD+ DTLEND
-DTLSTART = spnl* '/DTL' nl
+DTLSTART = spnl* '/DTL' [sp 'RUNTIMEVARIABLES' sp {'ON' | 'OFF'}] nl
 DTLEND   = '/END' nl?
 TASKTYPE = <'/TASKTYPE'> sp task_type_settings nl
 (* <task_type_settings> = {'COPY' [copy_settings]} | SORT | 'MERGE' | 'JOIN' | 'AGGREGATE' *)
@@ -20,7 +20,6 @@ TASKTYPE = <'/TASKTYPE'> sp task_type_settings nl
 	   {'/REFORMAT' rest_of_line}
 	   {'/COLLATINGSEQUENCE' rest_of_line}
 	   {'/VALUE' rest_of_line}
-	   {'/CONDITION' rest_of_line}
 	   {'/COLLATINGSEQUENCE' rest_of_line}
 	   {'/CONDITION' rest_of_line}
 	   {'/DATASIZE' rest_of_line}
@@ -59,9 +58,10 @@ TASKTYPE = <'/TASKTYPE'> sp task_type_settings nl
 
 DATADICTIONARY = '/DATADICTIONARY' sp #'.*' nl
 (* this is a comment *)
-KEYS = '/KEYS' sp field (',' sp* field)* nl
-field = field_name sp* ['COLLATINGSEQUENCE' sp sequence] sp* [sense]
-<field_name> = #'[^ \n,]+'
+KEYS = '/KEYS' sp fields nl
+fields = field (sp* <','> sp* field)*
+<field> = field_name sp* ['COLLATINGSEQUENCE' sp sequence] sp* [sense]
+field_name = #'[^ \n,]+'
 sequence = #'[^ \n]+'
 sense = 'ASCENDING' | 'DESCENDING'
 DELIMITEDRECORDLAYOUT = <'/DELIMITEDRECORDLAYOUT'> sp NAME sp* <'{'> sp* rlfield (sp* ',' sp* rlfield)* sp* '}' nl
@@ -101,13 +101,13 @@ SERVERCONNECTIONCMD = <'/SERVERCONNECTION'> sp NAME sp connection_type sp* [ALIA
 connection_type = 'FTP' | 'SFTP' | 'HDFS'
 ALIAS = <'ALIAS'> sp #'[^ \n]+'
 STLF = <'STLF'>
-FIELDSEPARATOR = <'FIELDSEPARATOR'> sp #'[xX]?[\'\"][a-zA-Z0-9]+[\'\"]'
+FIELDSEPARATOR = <'FIELDSEPARATOR'> sp #'[xX]?[\'\"][a-zA-Z0-9 ,\|\t]+[\'\"]'
 ENCLOSEDBY = <'ENCLOSEDBY'> sp leading_character [sp* ',' sp* trailing_character] sp*
-leading_character = {'""""'}
+<leading_character> = {'""""'}
 		    {"''''"}
 		    {#'[\'\"].[\'\"]'}
 		    
-trailing_character = #'[\'"]' #'.' #'[\'"]'
+<trailing_character> = #'[\'"]' #'.' #'[\'"]'
 LAYOUT = <'LAYOUT'> sp #'[\-_a-zA-Z0-9]+'
 number = #'[0-9]+'
 <sp> = <#'\s+'>

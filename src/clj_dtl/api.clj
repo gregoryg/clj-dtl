@@ -168,6 +168,22 @@
    (filter #(= "target" (:type %)) 
            (flatten (map #(:fields %) (tagged-tasks)))))) ;; could use (set tagged-tasks) to ensure uniqueness
 
+(defn unmatched-to-links
+  []
+  (let [links (tagged-links)
+        to-links (map #(:to %) links)
+        from-links (map #(:from %) links)]
+    (seq
+     (clojure.set/difference (set to-links) (set from-links)))))
+
+(defn unmatched-from-links
+  []
+  (let [links (tagged-links)
+        to-links (map #(:to %) links)
+        from-links (map #(:from %) links)]
+    (seq
+     (clojure.set/difference (set from-links) (set to-links)))))
+
 (defn- unmatched-source-paths
   "Paths defined as sources with no matching targets"
   []
@@ -208,6 +224,25 @@
                (s/replace 
                 (read-task task-id) #"\n\s*" "\n"))))
 
+(defn- validate-initial-mapper-count
+  "Mapreduce job must have single initial mapper task."
+  [errors]
+  (let [initial-tasks (unmatched-from-links)]
+    (if-not (= 1 (count initial-tasks))
+      (into errors {:invalid-initial-mapper-count (str "There can be only one initial mapper task; Found " (count initial-tasks) ": " (s/join ", " initial-tasks))}))))
+
+(defn- validate-dfs-source
+  [errors]
+  (into errors {:HNODITSR "Initial mapper source must be HDFS type."}))
+
+(defn validate-mapreduce-job
+  []
+  (-> {}
+      (validate-initial-mapper-count)
+      (validate-dfs-source)
+      )
+  )
+
 (defn task-source-params
   [task-id]
   (filter 
@@ -231,7 +266,7 @@
 /END")
 
 (def dtl-parser
-  (insta/parser (slurp "src/clj_dtl/dtl.ebnf") :output-format :enlive))
+  (insta/parser (slurp "src/clj_dtl/dtl.ebnf") :output-format :hiccup :auto-whitespace :standard))
 
 ;; (dtl-parser g :total true)
 
